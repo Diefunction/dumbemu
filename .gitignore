@@ -23,21 +23,66 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+pip-wheel-metadata/
+share/python-wheels/
 
 # Virtual environments
 venv/
 env/
 ENV/
+.venv/
+.ENV/
 
 # IDE specific files
 .idea/
 .vscode/
 *.swp
 *.swo
+*.sublime-*
+.DS_Store
 
 # Jupyter Notebook
 .ipynb_checkpoints
 
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+*.cover
+*.py,cover
+.coverage.*
+coverage.xml
+*.log
+
 # Local configuration
 .env
-.env.local 
+.env.local
+*.local
+
+# Project specific - Don't push these
+tests/
+examples/
+*.exe
+*.dll
+*.bin
+*.dump
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+*~
+.*.swp
+
+# Debug files
+*.pdb
+*.ilk
+*.exp
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
