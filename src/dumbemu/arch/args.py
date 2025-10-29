@@ -1,32 +1,53 @@
-"""Argument handling abstraction for function calls."""
+"""Function argument handling for different calling conventions."""
 from __future__ import annotations
 from typing import Any, List, Tuple, TYPE_CHECKING
+from ..utils.constants import ABI
 
 if TYPE_CHECKING:
-    from ..context import Context
+    from ..core.context import Context
     from ..mem.memory import Mem
 
 class Args:
-    """Abstracts argument preparation and reading for different calling conventions."""
+    """Calling convention argument handler.
     
-    # Win64 register order
-    WIN64_REGS = ['rcx', 'rdx', 'r8', 'r9']
+    Manages argument preparation and reading for different ABIs
+    including Win64, stdcall, SysV x64, and cdecl.
+    """
+    
+    # Use ABI constants
+    WIN64_REGS = ABI.WIN64
+    SYSV64_REGS = ABI.SYSV64
     
     def __init__(self, ctx: Context):
         self.ctx = ctx
         
-    def prep(self, mem: Mem, sp: int, args: Tuple[Any, ...], shadow: bool = False) -> Tuple[int, List[Any], List[Any]]:
+    def prep(self, mem: Mem, sp: int, args: Tuple[Any, ...], shadow: bool = False, conv: str = None) -> Tuple[int, List[Any], List[Any]]:
         """
         Prepare arguments for function call.
+        
+        Stack alignment rules:
+        - SysV x64: RSP must be 16-byte aligned before CALL
+        - Win64: Requires 32 bytes shadow space for first 4 args
+        - x86: No specific alignment required by ABI
+        
         Returns: (sp, regs, stack)
         """
         width = self.ctx.width
         bits = self.ctx.bits
+        conv = conv or self.ctx.conv
         
         if self.ctx.is_64:
-            # Win64: First 4 args in registers
-            regs = list(args[:4])
-            stack = list(args[4:])
+            if conv == 'win64':
+                # Win64: First 4 args in registers
+                regs = list(args[:4])
+                stack = list(args[4:])
+            elif conv == 'sysv64':
+                # SysV x64: First 6 args in registers
+                regs = list(args[:6])
+                stack = list(args[6:])
+            else:
+                regs = list(args[:4])  # Default
+                stack = list(args[4:])
             
             # Push stack args right-to-left
             for arg in reversed(stack):
@@ -86,28 +107,43 @@ class Args:
                     cur += 4
         return args
     
-    def regs(self, regs) -> List[int]:
-        """Read register arguments (Win64 only)."""
+    def regs(self, registers, conv: str = None) -> List[int]:
+        """Read register arguments based on calling convention."""
         if not self.ctx.is_64:
             return []
         
-        return [regs.read(name) for name in self.WIN64_REGS]
+        conv = conv or self.ctx.conv
+        if conv == 'sysv64':
+            return [registers.read(name) for name in self.SYSV64_REGS]
+        else:  # win64 or default
+            return [registers.read(name) for name in self.WIN64_REGS]
     
-    def read(self, mem: Mem, regs, sp: int, sizes: List[int]) -> Tuple[int, ...]:
+    def read(self, mem: Mem, regs, sp: int, sizes: List[int], conv: str = None) -> Tuple[int, ...]:
         """Read all arguments based on calling convention."""
+        conv = conv or self.ctx.conv
+        
         if self.ctx.is_64:
-            # Win64: First 4 from registers, rest from stack
             args = []
-            vals = self.regs(regs)
+            vals = self.regs(regs, conv)
             
-            for i, size in enumerate(sizes):
-                if i < 4:
-                    # From register
-                    args.append(vals[i] if i < len(vals) else 0)
-                else:
-                    # From stack (skip return address + 32 bytes shadow space for args 1-4)
-                    off = 8 + 32 + (i - 4) * 8
-                    args.append(mem.unpack(sp + off, 8))
+            if conv == 'sysv64':
+                # SysV x64: First 6 from registers, rest from stack
+                for i, size in enumerate(sizes):
+                    if i < 6:
+                        args.append(vals[i] if i < len(vals) else 0)
+                    else:
+                        # From stack (skip return address only)
+                        off = 8 + (i - 6) * 8
+                        args.append(mem.unpack(sp + off, 8))
+            else:  # win64
+                # Win64: First 4 from registers, rest from stack
+                for i, size in enumerate(sizes):
+                    if i < 4:
+                        args.append(vals[i] if i < len(vals) else 0)
+                    else:
+                        # From stack (skip return address + 32 bytes shadow space)
+                        off = 8 + 32 + (i - 4) * 8
+                        args.append(mem.unpack(sp + off, 8))
             
             return tuple(args)
         else:
@@ -117,14 +153,15 @@ class Args:
     def cleanup(self, sp: int, proto) -> int:
         """Calculate new SP after function return based on calling convention."""
         if self.ctx.is_64:
-            # Win64: Caller cleans up
+            # Both Win64 and SysV x64: Caller cleans up
             return sp + 8  # Pop return address only
         else:
             # x86: stdcall = callee cleans, cdecl = caller cleans
             if proto.conv == 'stdcall':
                 # Callee cleans: pop return + args
-                total = sum(max(4, s) for s in proto.args)
+                # Ensure all args are integer byte sizes (min 4 bytes for x86 stack slots)
+                total = sum(max(4, int(s) if not isinstance(s, int) else s) for s in proto.args)
                 return sp + 4 + total
             else:
-                # Caller cleans: pop return only
+                # cdecl: Caller cleans (pop return only)
                 return sp + 4

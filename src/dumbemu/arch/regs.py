@@ -1,12 +1,16 @@
-"""CPU state and register management."""
+"""CPU register management and access."""
 from __future__ import annotations
 from typing import Union
 from .base import Arch
 from .x86 import X86
 from .x64 import X64
 
-class Regs:
-    """Register access and calling convention setup."""
+class Registers:
+    """CPU register access wrapper.
+    
+    Provides architecture-agnostic register access and
+    calling convention setup for x86/x64.
+    """
     
     def __init__(self, ctx):
         self.ctx = ctx

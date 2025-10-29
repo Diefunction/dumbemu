@@ -1,4 +1,4 @@
-"""Stack management for emulation."""
+"""Stack memory management for function calls."""
 from __future__ import annotations
 from typing import Any, Tuple
 from ..utils.constants import STACK_32, STACK_64
@@ -6,7 +6,11 @@ from ..utils.logger import log
 
 
 class Stack:
-    """Stack memory management."""
+    """Stack memory manager.
+    
+    Handles stack initialization, push/pop operations,
+    and argument passing for function calls.
+    """
     
     def __init__(self, ctx):
         self.base = ctx.stack

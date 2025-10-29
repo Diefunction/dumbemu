@@ -1,8 +1,14 @@
-"""Simple logging utility for DumbEmu."""
+"""Logging utility for debug output."""
+from __future__ import annotations
 import sys
 
 class Logger:
-    """Simple logger with verbose mode."""
+    """Simple debug logger with verbosity control.
+    
+    Provides debug, info, warning, and error logging.
+    - debug/info: Only shown when verbose=True
+    - warning/error: Always shown regardless of verbose setting
+    """
     
     _verbose = False
     
@@ -25,6 +31,11 @@ class Logger:
     
     @classmethod
     def warn(cls, msg: str) -> None:
+        """Print warning message (deprecated, use warning())."""
+        cls.warning(msg)
+    
+    @classmethod
+    def warning(cls, msg: str) -> None:
         """Print warning message."""
         print(f"[WARN] {msg}", file=sys.stderr)
     

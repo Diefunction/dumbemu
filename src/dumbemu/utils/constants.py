@@ -1,4 +1,9 @@
-"""Constants, addresses, and register mappings for x86/x64 emulation."""
+"""Constants and register mappings for x86/x64 emulation.
+
+Defines memory addresses, register IDs, and utility functions
+for both Windows and Linux platforms.
+"""
+from __future__ import annotations
 from unicorn import UC_ARCH_X86, UC_MODE_32, UC_MODE_64, UC_PROT_READ, UC_PROT_WRITE, UC_PROT_EXEC, UC_HOOK_CODE
 from unicorn.x86_const import (
     UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ECX, UC_X86_REG_EDX,
@@ -33,31 +38,52 @@ def align_up(addr: int) -> int:
     """Align address up to page boundary."""
     return (addr + PAGE - 1) & ~(PAGE - 1)
 
-# Base addresses (avoid PE image bases)
+# Memory layout configuration
 class Addr:
-    """Memory layout addresses."""
+    """Fixed memory addresses for emulation.
+    
+    Defines stack, heap, and system structure addresses
+    for both 32-bit and 64-bit architectures.
+    """
     # Stack
     STACK_32 = 0x10000000
     STACK_64 = 0x70000000
     # Fake returns for stopping execution
     FAKE_RET_32 = 0xDEADBEEF
-    FAKE_RET_64 = 0xDEADBEEF_F00DBA5E
+    # Use a safe canonical high address to avoid host/Unicorn mem_map issues
+    FAKE_RET_64 = 0x7EFFF000
     # Allocator region
     ALLOC_32 = 0x18000000
     ALLOC_64 = 0x60000000
     # Import trampolines
     TRAMPOLINE_32 = 0x0E100000
     TRAMPOLINE_64 = 0x7E000000
-    # TEB/PEB
+    # Windows TEB/PEB
     TEB_32 = 0x7FFDE000
     PEB_32 = 0x7FFDF000
     TEB_64 = 0x7FFE0000
     PEB_64 = 0x7FFD0000
+    # Linux defaults
+    ELF_BASE_32 = 0x08048000  # Default non-PIE base
+    ELF_BASE_64 = 0x400000    # Default non-PIE base x64
+    PIE_BASE_32 = 0x56555000  # Default PIE base
+    PIE_BASE_64 = 0x555555554000  # Default PIE base x64
+    AUXV_32 = 0x0FFFF000  # Auxiliary vector region
+    AUXV_64 = 0x7FFFFFFFE000  # Auxiliary vector region
 
-# Win64 ABI registers are defined in Args.WIN64_REGS as string names
+class ABI:
+    """Application Binary Interface register conventions.
+    
+    Defines register usage for Windows and Linux calling conventions.
+    """
+    # Win64: RCX, RDX, R8, R9
+    WIN64 = ['rcx', 'rdx', 'r8', 'r9']
+    # SysV x64: RDI, RSI, RDX, RCX, R8, R9
+    SYSV64 = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9']
+    # x86 uses stack for all conventions
 
-class Regs:
-    """Register name mappings."""
+class RegID:
+    """Register name to ID mappings."""
     X86 = {
         # General purpose 32-bit
         "eax": UC_X86_REG_EAX, "ebx": UC_X86_REG_EBX, "ecx": UC_X86_REG_ECX, "edx": UC_X86_REG_EDX,
@@ -103,13 +129,29 @@ class Regs:
         "fs": UC_X86_REG_FS, "gs": UC_X86_REG_GS, "ss": UC_X86_REG_SS,
     }
 
+# Platform constants
+class Platform:
+    """Platform identifiers for OS detection."""
+    WINDOWS = "windows"
+    LINUX = "linux"
+    UNKNOWN = "unknown"
+
+# Execution limits
+DEFAULT_MAX_INSNS = 1000000  # Default max instructions for call()
+
+# Memory offsets
+MODULE_HANDLE_OFFSET = 0x400000  # Base offset for module handles
+
 # PE section flags
 SCN_READ = 0x40000000
 SCN_WRITE = 0x80000000
 SCN_EXEC = 0x20000000
 
 def to_prot(flags: int) -> int:
-    """Convert PE section flags to Unicorn protection flags."""
+    """Convert PE section flags to Unicorn protection flags.
+    
+    Handles edge cases like W^X and ensures at least READ permission.
+    """
     prot = 0
     if flags & SCN_READ:
         prot |= UC_PROT_READ
@@ -117,7 +159,16 @@ def to_prot(flags: int) -> int:
         prot |= UC_PROT_WRITE
     if flags & SCN_EXEC:
         prot |= UC_PROT_EXEC
-    return prot or UC_PROT_READ
+    
+    # Handle edge cases
+    if prot == 0:
+        # No permissions set, default to READ
+        prot = UC_PROT_READ
+    elif (prot & UC_PROT_WRITE) and (prot & UC_PROT_EXEC):
+        # W^X detected, ensure READ is also set for compatibility
+        prot |= UC_PROT_READ
+    
+    return prot
 
 __all__ = [
     # Unicorn constants
@@ -126,9 +177,13 @@ __all__ = [
     # Memory
     "PAGE", "STACK_32", "STACK_64", "MAX_STR",
     # Classes
-    "Addr", "Regs", 
+    "Addr", "RegID", "ABI", "Platform",
     # Functions
     "to_prot", "align_down", "align_up",
+    # Execution limits
+    "DEFAULT_MAX_INSNS", "MODULE_HANDLE_OFFSET",
+    # PE section flags
+    "SCN_READ", "SCN_WRITE", "SCN_EXEC",
     # Optional
     "UC_X86_REG_GS_BASE", "UC_X86_REG_FS_BASE"
 ]

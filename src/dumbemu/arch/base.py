@@ -1,13 +1,19 @@
-"""Abstract base class for CPU architecture implementations."""
+"""Base class for CPU architecture implementations."""
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any, Tuple, Union, TYPE_CHECKING
-from ..utils.constants import Regs
+from ..utils.constants import RegID
 
 if TYPE_CHECKING:
-    from ..context import Context
+    from ..core.context import Context
+    from ..mem.memory import Mem
 
 class Arch(ABC):
-    """Abstract base class for CPU architectures."""
+    """Abstract CPU architecture interface.
+    
+    Base class for x86 and x64 architecture implementations
+    with register access and calling convention support.
+    """
     def __init__(self, ctx: 'Context'):
         self.ctx = ctx
 
@@ -57,7 +63,7 @@ class Arch(ABC):
         Raises:
             KeyError: If register name unknown
         """
-        m = Regs.X64 if self.ctx.is_64 else Regs.X86
+        m = RegID.X64 if self.ctx.is_64 else RegID.X86
         if name not in m:
             raise KeyError(f"Unknown register: {name}")
         return m[name]

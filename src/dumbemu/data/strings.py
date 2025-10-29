@@ -1,13 +1,19 @@
-"""String operations for memory."""
+"""String read/write operations for memory."""
 from __future__ import annotations
 from typing import TYPE_CHECKING
+from ..utils.constants import MAX_STR
+from ..utils.logger import log
 
 if TYPE_CHECKING:
     from ..mem.memory import Mem
 
 
 class Strings:
-    """Handle string operations in memory."""
+    """String operations for reading/writing ASCII and Unicode strings.
+    
+    Handles null-terminated C strings and UTF-16 wide strings
+    commonly found in Windows and Linux executables.
+    """
     
     def __init__(self, mem: Mem):
         """Initialize with memory manager.
@@ -17,7 +23,7 @@ class Strings:
         """
         self.mem = mem
     
-    def read(self, addr: int, max_len: int = 4096, wide: bool = False) -> str:
+    def read(self, addr: int, max_len: int = MAX_STR, wide: bool = False) -> str:
         """Read null-terminated string from memory.
         
         Args:
@@ -51,7 +57,7 @@ class Strings:
         else:
             return self.ascii(addr, text, null)
     
-    def cstring(self, addr: int, max_len: int = 4096) -> str:
+    def cstring(self, addr: int, max_len: int = MAX_STR) -> str:
         """Read null-terminated ASCII string.
         
         Args:
@@ -63,7 +69,7 @@ class Strings:
         """
         return self._read(addr, max_len, 1, "ascii")
     
-    def wstring(self, addr: int, max_len: int = 4096) -> str:
+    def wstring(self, addr: int, max_len: int = MAX_STR) -> str:
         """Read null-terminated UTF-16 wide string.
         
         Args:
@@ -74,31 +80,76 @@ class Strings:
             Decoded UTF-16 string
         """
         return self._read(addr, max_len, 2, "utf-16le")
-    
-    def _read(self, addr: int, max_len: int, width: int, encoding: str) -> str:
-        """Generic string reading helper.
+
+    def wstring32(self, addr: int, max_len: int = MAX_STR) -> str:
+        """Read null-terminated UTF-32 little-endian wide string (Linux wchar_t).
         
         Args:
             addr: String address
             max_len: Maximum characters to read
-            width: Character width in bytes (1 for ASCII, 2 for UTF-16)
+        
+        Returns:
+            Decoded UTF-32 string
+        """
+        return self._read(addr, max_len, 4, "utf-32le")
+    
+    def _read(self, addr: int, max_len: int, width: int, encoding: str) -> str:
+        """Generic string reading helper with chunked reads for performance.
+        
+        Args:
+            addr: String address
+            max_len: Maximum characters to read
+            width: Character width in bytes (1 for ASCII, 2 for UTF-16, 4 for UTF-32)
             encoding: Text encoding to use
             
         Returns:
-            Decoded string
+            Decoded string (truncated to MAX_STR if needed)
         """
         if max_len <= 0:
             return ""
         
+        # Enforce MAX_STR limit
+        max_len = min(max_len, MAX_STR)
+        
         term = b"\x00" * width
         out = bytearray()
         
-        for _ in range(max_len):
-            ch = self.mem.read(addr, width)
-            if ch == term:
+        # Chunked reading for performance (read PAGE-sized chunks when possible)
+        from ..utils.constants import PAGE
+        chunk_size = min(PAGE, max_len * width)  # Read up to a page at a time
+        
+        while len(out) < max_len * width:
+            remaining = (max_len * width) - len(out)
+            to_read = min(chunk_size, remaining)
+            
+            try:
+                # Read a chunk
+                chunk = self.mem.read(addr, to_read)
+                
+                # Find terminator in chunk
+                for i in range(0, len(chunk), width):
+                    if chunk[i:i+width] == term:
+                        # Found terminator
+                        out += chunk[:i]
+                        return out.decode(encoding, errors="replace")
+                
+                # No terminator found, add entire chunk
+                out += chunk
+                addr += to_read
+                
+                # Safety check
+                if len(out) >= MAX_STR * width:
+                    log.debug(f"String read truncated at {MAX_STR} characters")
+                    break
+                    
+            except Exception as e:
+                # Fall back to byte-by-byte on error (e.g., unmapped memory)
+                if not out:
+                    # Complete failure on first read
+                    log.error(f"String read failed at 0x{addr:08X}: {e}")
+                    raise
+                # Partial read succeeded, return what we have
                 break
-            out += ch
-            addr += width
         
         return out.decode(encoding, errors="replace")
     

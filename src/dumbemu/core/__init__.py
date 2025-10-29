@@ -1,20 +1,18 @@
-"""
-DumbEmu - Cross-platform x86/x64 emulator for malware analysis.
+"""Core emulator components.
 
-Supports both Windows PE and Linux ELF executables.
-Built on Unicorn Engine with automatic format detection.
-Simple and focused on practical reverse engineering.
+Main emulator class, context, and exception hierarchy.
 """
 from __future__ import annotations
-from .core import (
-    DumbEmu,
+from .emulator import DumbEmu
+from .context import Context
+from .exceptions import (
     EmuError, LoaderError, FormatError, MemoryError,
     ExecutionError, EmuLimitError, SegFaultError,
     StubError, ArgumentError
 )
 
 __all__ = [
-    "DumbEmu",
+    "DumbEmu", "Context",
     "EmuError", "LoaderError", "FormatError", "MemoryError",
     "ExecutionError", "EmuLimitError", "SegFaultError",
     "StubError", "ArgumentError"

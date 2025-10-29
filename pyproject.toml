@@ -1,14 +1,16 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "dumbemu"
-version = "1.0.0"
-description = "A lightweight, performant PE emulator built on Unicorn Engine for Windows executable analysis"
+version = "2.0.0"
+description = "A lightweight, performant PE/ELF emulator built on Unicorn Engine"
+authors = [{name = "Diefunction"}]
+license = {text = "MIT"}
 readme = "README.md"
 requires-python = ">=3.8"
-license = {text = "MIT"}
-authors = [
-    {name = "Diefunction"},
-]
-keywords = ["emulator", "pe", "windows", "unicorn", "reverse-engineering", "ctf"]
+keywords = ["emulator", "pe", "elf", "windows", "linux", "unicorn", "reverse-engineering", "ctf"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
@@ -22,25 +24,129 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
     "Topic :: Software Development :: Debuggers",
-    "Topic :: Software Development :: Disassemblers",
+    "Topic :: Software Development :: Disassemblers"
 ]
 
 dependencies = [
-    "unicorn >= 2.0.0",
-    "lief >= 0.13.0",
+    "unicorn>=2.0.0",
+    "lief>=0.13.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0",
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0"
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/Diefunction/dumbemu"
+Homepage = "https://github.com/Diefunction/dumbemu"
 "Bug Tracker" = "https://github.com/Diefunction/dumbemu/issues"
-"Documentation" = "https://github.com/Diefunction/dumbemu#readme"
+Documentation = "https://github.com/Diefunction/dumbemu#readme"
 
-[build-system]
-requires = ["setuptools >= 61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+[tool.black]
+line-length = 120
+target-version = ['py38', 'py39', 'py310', 'py311']
+include = '\.pyi?$'
+extend-exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.pytest_cache
+  | __pycache__
+  | build
+  | dist
+  | examples
+)/
+'''
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "C4",   # flake8-comprehensions
+    "UP",   # pyupgrade
+]
+ignore = [
+    "E501",  # line too long (handled by black)
+    "F401",  # unused import (we have some intentional re-exports)
+    "B008",  # do not perform function calls in argument defaults
+    "C408",  # unnecessary dict/list/tuple call
+]
+exclude = [
+    ".git",
+    "__pycache__",
+    "build",
+    "dist",
+    "examples",
+    "tests",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["dumbemu"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401", "F403"]
+"tests/*" = ["F401", "F403", "F811"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_any_generics = false
+ignore_missing_imports = true
+follow_imports = "normal"
+show_error_codes = true
+strict_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+check_untyped_defs = true
+no_implicit_reexport = false
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--verbose",
+    "-ra"
+]
+
+[tool.coverage.run]
+source = ["src/dumbemu"]
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+    "*/examples/*"
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "pass"
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+dumbemu = ["py.typed"]

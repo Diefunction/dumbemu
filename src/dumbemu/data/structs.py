@@ -1,4 +1,4 @@
-"""Structure packing and unpacking operations."""
+"""Binary structure packing and unpacking operations."""
 from __future__ import annotations
 import struct as _struct
 from typing import Tuple, Any, Dict, TYPE_CHECKING
@@ -9,7 +9,11 @@ if TYPE_CHECKING:
 from .strings import Strings
 
 class Struct:
-    """Handle structured data in memory."""
+    """Structured data operations for memory.
+    
+    Provides convenient methods for reading and writing
+    binary structures, arrays, and mixed data types.
+    """
     
     def __init__(self, mem: Mem):
         """Initialize with memory manager.

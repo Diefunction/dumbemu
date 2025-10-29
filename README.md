@@ -1,30 +1,38 @@
 # DumbEmu
 
-A lightweight, performant PE emulator built on Unicorn Engine for Windows executable analysis and function testing.
+A lightweight, cross-platform emulator built on Unicorn Engine for Windows PE and Linux ELF executable analysis and function testing.
 
 ## Features
 
 ### Core Capabilities
-- **Architecture Support**: Automatic detection and support for x86 (32-bit) and x64 (64-bit) PE files
-- **PE Loading**: Complete PE parsing with proper section mapping and permissions
-- **Windows Environment**: TEB/PEB structure initialization for Windows-aware execution
-- **IAT Stubbing**: Import Address Table hooking with customizable function stubs
+- **Cross-Platform Support**: Automatic format detection for both Windows PE and Linux ELF executables
+- **Architecture Support**: Automatic detection and support for x86 (32-bit) and x64 (64-bit) binaries
+- **Binary Loading**: Complete PE/ELF parsing with proper section mapping and permissions
+- **Platform Environments**: 
+  - Windows: TEB/PEB structure initialization
+  - Linux: Auxiliary vector and process environment setup
+- **Import Stubbing**: IAT/PLT hooking with pluggable, customizable function stubs for both platforms
 
 ### Memory Management
 - **Smart Allocation**: Page-aligned memory allocator with tracking
 - **Protection Control**: Fine-grained memory permission management  
-- **String Operations**: Native support for ASCII and UTF-16 strings
+- **String Operations**: Native support for ASCII, UTF-16, and UTF-32 strings
 - **Struct Operations**: Pack/unpack structured data with format strings
+- **Bulk Mapping**: Optimized page-range mapping with automatic alignment
 
 ### Execution Control
-- **Function Calling**: Proper x86/x64 calling convention implementation
+- **Calling Conventions**: Full support for Win64, SysV x64, stdcall, and cdecl ABIs
+- **Function Calling**: Proper argument marshaling and stack alignment
 - **Raw Execution**: Direct code execution without function overhead
 - **Breakpoints**: Set breakpoints to pause execution at specific addresses
 - **Instruction Limits**: Prevent infinite loops with instruction count limits
-- **Execution Tracing**: Record executed addresses and instruction counts
+- **Stack Guards**: Optional stack-depth watchdog to detect stack overflow/underflow
+- **Code Caging**: Restrict execution to specific address ranges
+- **Execution Tracing**: Record executed addresses with optional ring-buffer mode
 
 ### Advanced Features
-- **Code Hooks**: Install callbacks at specific addresses
+- **Dynamic Hooks**: Automatic switching between targeted and global hook modes for optimal performance
+- **Custom Exceptions**: Granular exception hierarchy (SegFaultError, EmuLimitError, etc.)
 - **Register Access**: Full access to all x86/x64 registers including segments
 - **Stack Management**: Automatic stack setup with push/pop operations
 - **Verbose Logging**: Optional detailed logging for debugging
@@ -66,8 +74,8 @@ These dependencies will be automatically installed when you install dumbemu.
 ```python
 from dumbemu import DumbEmu
 
-# Load PE file (architecture auto-detected)
-emu = DumbEmu("target.exe")
+# Load executable (PE or ELF, architecture auto-detected)
+emu = DumbEmu("target.exe")  # or "binary.elf"
 
 # Call function at 0x401000 with three arguments
 result = emu.call(0x401000, None, 10, 20, 30)
@@ -95,25 +103,35 @@ emu.struct.write(addr, "IHH", 0xDEADBEEF, 0x1337, 0x42)
 values = emu.struct.read(addr, "IHH")
 ```
 
-### IAT Stubbing
+### Import Stubbing (Windows/Linux)
 
 ```python
-from dumbemu.win.iat import Proto
+from dumbemu.stubs import Proto, Symbol
 
-# Define a stub for GetProcAddress
-def get_proc_stub(iat, uc, args):
+# Windows IAT stub example
+def get_proc_stub(stubs, uc, args):
     # args = (hModule, lpProcName)
     proc_name_ptr = args[1]
-    proc_name = iat.strings.cstring(proc_name_ptr)
+    proc_name = stubs._str(proc_name_ptr)
     print(f"GetProcAddress called for: {proc_name}")
     return 0x12345678  # Return fake address
 
-# Register the stub
+# Register the stub (Windows)
 emu.stub("kernel32.dll", "GetProcAddress", 
          Proto("GetProcAddress", emu.ctx.conv, [4, 4]),
          get_proc_stub)
 
-# Now any calls to GetProcAddress will use our stub
+# Linux PLT stub example
+def printf_stub(stubs, uc, args):
+    fmt_ptr = args[0]
+    fmt = stubs._str(fmt_ptr)
+    print(f"[printf] {fmt}")
+    return len(fmt)
+
+# Register the stub (Linux)
+emu.stub("libc.so.6", "printf",
+         Symbol("printf", "cdecl", [8]),
+         printf_stub)
 ```
 
 ### Execution Hooks
@@ -159,8 +177,36 @@ result = emu.call(0x401000, max_insns=10000)
 # Execute with breakpoint
 result = emu.call(0x401000, breakpoint=0x401050)
 
+# Enable stack guard (detect stack overflow/underflow)
+result = emu.call(0x401000, stack_guard=True)
+
+# Restrict execution to specific address range [min, max)
+result = emu.call(0x401000, code_cage=(0x400000, 0x500000))
+
 # Raw execution (no function call setup)
 emu.execute(0x401000, count=100)  # Execute 100 instructions
+
+# Execution tracing with ring buffer (memory-efficient)
+from dumbemu.debug.tracer import Tracer
+tracer = Tracer(emu.ctx, max_history=1000)  # Keep only last 1000 addresses
+addresses, count = tracer.run(0x401000, stop=0x401100)
+```
+
+### Exception Handling
+
+```python
+from dumbemu import DumbEmu, SegFaultError, EmuLimitError, ExecutionError
+
+emu = DumbEmu("target.exe")
+
+try:
+    result = emu.call(0x401000, code_cage=(0x400000, 0x402000))
+except SegFaultError as e:
+    print(f"Segmentation fault at address: 0x{e.address:08X}")
+except EmuLimitError as e:
+    print(f"Execution limit reached: {e.limit_type} = {e.value}")
+except ExecutionError as e:
+    print(f"Execution error: {e}")
 ```
 
 ## API Reference
@@ -173,15 +219,24 @@ DumbEmu(path: str, verbose: bool = False)
 
 #### Core Methods
 
-- `call(addr, breakpoint=None, *args, max_insns=1000000) -> int`
-  - Call function with arguments
+- `call(addr, breakpoint=None, *args, max_insns=1000000, stack_guard=True, code_cage=None) -> int`
+  - Call function with arguments and calling convention support
+  - `stack_guard`: Enable stack-depth watchdog (default: True)
+  - `code_cage`: Optional (min_addr, max_addr) to restrict execution [min, max)
   - Returns function return value
   
-- `execute(addr, until=None, count=None)`
+- `execute(addr, until=None, count=None, stack_guard=False, code_cage=None)`
   - Execute raw code without function call setup
   
 - `hook(addr, callback)`
   - Install code hook at address
+  
+- `stub(module, name, proto, callback) -> int`
+  - Register import stub handler (works for both Windows IAT and Linux PLT)
+  - Returns virtual address of the stub
+  
+- `invoke(module, name, *args) -> int`
+  - Call imported function by name
   
 - `malloc(size, prot=RW) -> int`
   - Allocate memory region
@@ -189,23 +244,33 @@ DumbEmu(path: str, verbose: bool = False)
 - `free(addr) -> bool`
   - Free allocated memory
 
+- `trace(addr, stop=None, count=None) -> (list, int)`
+  - Trace execution and collect addresses
+  - Returns (addresses_list, instruction_count)
+
 #### Memory Access
 
-- `read(addr, size) -> bytes`
+- `mem.read(addr, size) -> bytes`
   - Read bytes from memory
   
-- `write(addr, data)`
+- `mem.write(addr, data)`
   - Write bytes to memory
+
+- `mem.is_mapped(addr) -> bool`
+  - Check if address is mapped
 
 #### Component Access
 
+- `emu.ctx` - Emulation context (platform, bitness, calling convention)
 - `emu.mem` - Memory manager
-- `emu.regs` - Register access
+- `emu.regs` - Register access (architecture-agnostic)
 - `emu.stack` - Stack operations
 - `emu.struct` - Struct pack/unpack
-- `emu.string` - String operations
-- `emu.tracer` - Execution tracer
-- `emu.iat` - IAT stub manager
+- `emu.string` - String operations (ASCII, UTF-16, UTF-32)
+- `emu.tracer` - Execution tracer (with ring-buffer mode)
+- `emu.stubs` - Unified stub manager (Windows: emu.iat, Linux: emu.plt)
+- `emu.hooks` - Code hook manager (dynamic mode switching)
+- `emu.alloc` - Memory allocator
 
 ### Memory Manager (emu.mem)
 
@@ -223,9 +288,11 @@ DumbEmu(path: str, verbose: bool = False)
 ### String Operations (emu.string)
 
 - `cstring(addr, max_len=4096) -> str` - Read null-terminated ASCII
-- `wstring(addr, max_len=4096) -> str` - Read null-terminated UTF-16
+- `wstring(addr, max_len=4096) -> str` - Read null-terminated UTF-16 (Windows)
+- `wstring32(addr, max_len=4096) -> str` - Read null-terminated UTF-32 (Linux wchar_t)
 - `ascii(addr, text, null=True)` - Write ASCII string
 - `wide(addr, text, null=True)` - Write UTF-16 string
+- Chunked reading for performance (page-sized chunks)
 
 ### Struct Operations (emu.struct)
 
@@ -264,27 +331,41 @@ else:
     print("[-] Invalid flag")
 ```
 
-### Windows API Stubbing
+### Cross-Platform Stubbing
 
 ```python
 from dumbemu import DumbEmu
-from dumbemu.win.iat import Proto
+from dumbemu.stubs import Proto, Symbol
 
-emu = DumbEmu("malware.exe", verbose = True)
+# Windows example
+emu_win = DumbEmu("malware.exe", verbose=True)
 
-# Stub common Windows APIs
-def MessageBoxA(iat, uc, args):
+def MessageBoxA(stubs, uc, args):
     text_ptr = args[1]
-    text = iat.strings.cstring(text_ptr) if text_ptr else ""
+    text = stubs._str(text_ptr) if text_ptr else ""
     print(f"[MessageBox] {text}")
     return 1  # IDOK
 
-emu.stub("user32.dll", "MessageBoxA",
-         Proto("MessageBoxA", emu.ctx.conv, [4, 4, 4, 4]),
-         MessageBoxA)
+emu_win.stub("user32.dll", "MessageBoxA",
+             Proto("MessageBoxA", "stdcall", [4, 4, 4, 4]),
+             MessageBoxA)
 
-# Run malware function
-emu.call(0x401000)
+# Linux example
+emu_linux = DumbEmu("binary.elf", verbose=True)
+
+def printf_stub(stubs, uc, args):
+    fmt_ptr = args[0]
+    fmt = stubs._str(fmt_ptr)
+    print(f"[printf] {fmt}")
+    return len(fmt)
+
+emu_linux.stub("libc.so.6", "printf",
+               Symbol("printf", "cdecl", [8]),
+               printf_stub)
+
+# Execute
+emu_win.call(0x401000)
+emu_linux.call(0x400580)
 ```
 
 ## Architecture
@@ -293,29 +374,46 @@ DumbEmu is organized into logical components:
 
 ```
 dumbemu/
-├── cpu/          # CPU architecture and registers
-│   ├── base.py   # Abstract architecture base
-│   ├── x86.py    # x86 32-bit implementation
-│   ├── x64.py    # x64 64-bit implementation
-│   └── regs.py   # Register access layer
-├── mem/          # Memory management
-│   ├── memory.py # Core memory operations
-│   ├── stack.py  # Stack management
-│   ├── alloc.py  # Memory allocator
-│   └── hooks.py  # Code hooks
-├── data/         # Data operations
-│   ├── strings.py # String operations
-│   └── structs.py # Struct pack/unpack
-├── win/          # Windows environment
-│   ├── iat.py    # IAT stubbing
-│   └── tebpeb.py # TEB/PEB structures
-├── debug/        # Debugging tools
-│   └── tracer.py # Execution tracer
-├── pe/           # PE file handling
-│   └── loader.py # PE parser and loader
-└── utils/        # Utilities
-    ├── constants.py # Constants and mappings
-    └── logger.py    # Logging system
+├── core/            # Core emulator components
+│   ├── emulator.py  # Main DumbEmu class
+│   ├── context.py   # Emulation context
+│   └── exceptions.py # Custom exception hierarchy
+├── arch/            # CPU architecture implementations
+│   ├── base.py      # Abstract architecture base
+│   ├── x86.py       # x86 32-bit implementation
+│   ├── x64.py       # x64 64-bit implementation
+│   ├── regs.py      # Register access layer
+│   └── args.py      # Calling convention argument handling
+├── mem/             # Memory management
+│   ├── memory.py    # Core memory operations with page tracking
+│   ├── stack.py     # Stack management
+│   ├── alloc.py     # Memory allocator
+│   ├── hooks.py     # Code hooks (dynamic mode switching)
+│   └── mapping.py   # Mapping utilities
+├── data/            # Data operations
+│   ├── strings.py   # String operations (chunked reads)
+│   └── structs.py   # Struct pack/unpack
+├── stubs/           # Import stubbing (cross-platform)
+│   ├── core.py      # Unified stub manager
+│   ├── win32.py     # Built-in Windows API stubs
+│   └── posix.py     # Built-in POSIX/libc stubs
+├── formats/         # Binary format parsers
+│   ├── factory.py   # Auto-detection factory
+│   ├── base.py      # Abstract loader base
+│   ├── pe.py        # Windows PE loader
+│   ├── elf.py       # Linux ELF loader
+│   └── utils.py     # Shared loader utilities
+├── platforms/       # Platform-specific environments
+│   ├── windows/     # Windows TEB/PEB
+│   │   └── tebpeb.py
+│   └── linux/       # Linux AuxV
+│       └── auxv.py
+├── debug/           # Debugging tools
+│   └── tracer.py    # Execution tracer (ring buffer)
+└── utils/           # Utilities
+    ├── constants.py # Constants, register maps, ABIs
+    ├── logger.py    # Logging system
+    └── types.py     # Type aliases
 ```
 
 

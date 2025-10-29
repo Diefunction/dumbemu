@@ -1,4 +1,4 @@
-"""Virtual memory allocator for dynamic memory management."""
+"""Dynamic memory allocator for runtime allocations."""
 from __future__ import annotations
 from typing import Dict
 from ..utils.constants import PAGE, UC_PROT_READ, UC_PROT_WRITE, UC_PROT_EXEC
@@ -6,7 +6,11 @@ from ..utils.logger import log
 from .memory import Mem
 
 class Alloc:
-    """Simple page-aligned memory allocator."""
+    """Page-aligned memory allocator.
+    
+    Manages dynamic memory allocation with tracking and
+    protection control for allocated regions.
+    """
     
     def __init__(self, ctx, mem: Mem):
         self.mem = mem
@@ -69,5 +73,5 @@ class Alloc:
             self.mem.unmap(addr, sz)
             log.debug(f"Alloc.free: 0x{addr:08X} ({sz:#x} bytes)")
             return True
-        log.warn(f"Alloc.free: 0x{addr:08X} not found")
+        log.warning(f"Alloc.free: 0x{addr:08X} not found")
         return False
